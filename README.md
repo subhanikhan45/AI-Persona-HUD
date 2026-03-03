@@ -11,12 +11,14 @@ A real-time, high-tech AI dashboard that detects facial emotions and assigns a "
 ## 🛠️ Tech Stack
 * **Language:** Python 3.12
 * **Libraries:** OpenCV, DeepFace, TensorFlow
+* Web Framework: Streamlit
 * **Hardware:** Optimized for Intel UHD 620 Graphics (Integrated)
 
 ## 📸 Screenshots
-*(You can upload your "Warrior" screenshot here later!)*
+
 
 ## 📥 Installation
 1. Install Python 3.12
 2. Run `pip install opencv-python deepface tf-keras`
 3. Run `python app.py`
+4. Web Dashboard: `streamlit run web_app.py`

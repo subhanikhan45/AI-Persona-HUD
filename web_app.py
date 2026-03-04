@@ -1,69 +1,48 @@
 import streamlit as st
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
-import av
-import cv2
+import av, cv2, queue
 from deepface import DeepFace
-import queue
 
-# 1. Page Config
 st.set_page_config(page_title="Neural Persona HUD", layout="wide")
 st.title("🛡️ Neural Persona: Web Dashboard v3.0")
 
-# STUN server to help the video pass through cloud firewalls
-RTC_CONFIG = RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]})
-
-# 2. THE BRIDGE: A shared queue to pass data between threads
-# (The camera thread 'puts' data, the main thread 'gets' it)
+# 1. The Queue Bridge
 result_queue = queue.Queue()
 
 class VideoProcessor(VideoProcessorBase):
     def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
         img = frame.to_ndarray(format="bgr24")
-        h, w, _ = img.shape
         try:
-            # AI Analysis
             results = DeepFace.analyze(img, actions=['emotion'], enforce_detection=False, detector_backend='opencv')
             if results:
                 emotions = results[0]['emotion']
-                dominant = results[0]['dominant_emotion'].upper()
-                
-                # Push analysis results to the main thread
+                # PUSH data to the queue
                 result_queue.put(emotions)
-
-                # Draw the HUD
-                cv2.rectangle(img, (w//2-130, h//2-130), (w//2+130, h//2+130), (255,0,255), 2)
-                cv2.putText(img, f"PERSONA: {dominant}", (w//2-120, h//2-140), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,0,255), 2)
-        except:
-            pass
+                
+                # Draw HUD
+                dominant = results[0]['dominant_emotion'].upper()
+                cv2.rectangle(img, (170, 110), (470, 410), (255, 0, 255), 2)
+                cv2.putText(img, f"PERSONA: {dominant}", (180, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 255), 2)
+        except: pass
         return av.VideoFrame.from_ndarray(img, format="bgr24")
 
-# 3. Layout
+# 2. Layout (The Fix is Here)
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    # Start the video stream
-    ctx = webrtc_streamer(
-        key="neural-persona",
-        video_processor_factory=VideoProcessor,
-        rtc_configuration=RTC_CONFIG,
-        media_stream_constraints={"video": True, "audio": False},
-    )
+    ctx = webrtc_streamer(key="neural", video_processor_factory=VideoProcessor, 
+                          rtc_configuration=RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}),
+                          media_stream_constraints={"video": True, "audio": False})
 
 with col2:
     st.subheader("📊 Live Analytics")
-    # This acts as a container that we will overwrite in the loop below
     chart_placeholder = st.empty()
-
-# 4. THE LIVE UPDATE LOOP
-# This part runs on the Main Thread and watches the queue for new AI data
-while ctx.state.playing:
-    try:
-        # Check for new emotion data (wait up to 0.1 seconds)
-        latest_emotions = result_queue.get(timeout=0.1)
-        if latest_emotions:
-            # Update the chart container with new data
-            chart_placeholder.bar_chart(latest_emotions)
-    except queue.Empty:
-        # If no new data yet, just keep waiting
-        continue
+    
+    # This simplified loop ensures the chart updates ONLY when data exists
+    while ctx.state.playing:
+        try:
+            # We use a very short timeout to keep the UI responsive
+            data = result_queue.get(timeout=0.1)
+            chart_placeholder.bar_chart(data)
+        except queue.Empty:
+            continue

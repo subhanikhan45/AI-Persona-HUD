@@ -4,7 +4,7 @@ import av, cv2, queue
 from deepface import DeepFace
 
 st.set_page_config(page_title="Neural Persona HUD", layout="wide")
-st.title("🛡️ Neural Persona: Web Dashboard v3.0")
+st.title("🛡️Emotion Live Detector")
 
 # 1. The Queue Bridge
 result_queue = queue.Queue()
@@ -46,4 +46,5 @@ with col2:
             chart_placeholder.bar_chart(data)
         except queue.Empty:
             continue
+
 

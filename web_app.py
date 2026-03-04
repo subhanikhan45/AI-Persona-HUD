@@ -4,7 +4,7 @@ import av, cv2, queue
 from deepface import DeepFace
 
 st.set_page_config(page_title="Neural Persona HUD", layout="wide")
-st.title("🛡️ Neural Persona: Web Dashboard v6.0")
+st.title("🛡️ Neural Persona: Web Dashboard v7.0")
 
 # 1. The Data Bridge
 if "status_queue" not in st.session_state:
@@ -15,29 +15,34 @@ class VideoProcessor(VideoProcessorBase):
         img = frame.to_ndarray(format="bgr24")
         
         try:
-            # We use 'mediapipe' here because it is significantly more stable in the cloud
-            results = DeepFace.analyze(img, actions=['emotion'], enforce_detection=False, detector_backend='mediapipe')
+            # We use enforce_detection=False to prevent the 'No face detected' crash
+            # We use detector_backend='opencv' because it is the LIGHTEST for your 8GB RAM
+            results = DeepFace.analyze(img, actions=['emotion'], 
+                                       enforce_detection=False, 
+                                       detector_backend='opencv',
+                                       align=False) # Align=False makes it 2x faster
             
             if results and len(results) > 0:
                 face = results[0]['region']
-                x, y, w, h = face['x'], face['y'], face['w'], face['h']
+                # The exact coordinates of your face
+                x, y, w, h = int(face['x']), int(face['y']), int(face['w']), int(face['h'])
                 
                 dominant = results[0]['dominant_emotion'].upper()
                 score = results[0]['emotion'][dominant.lower()]
                 
-                # Send data to the right-side dashboard
+                # Update the right-side dashboard
                 st.session_state.status_queue.put({"emo": dominant, "conf": score})
 
-                # DRAW: The Pink Square that FOLLOWS the face
+                # DRAWING THE BOX:
                 pink = (255, 0, 255)
+                # Draw the main tracking square
                 cv2.rectangle(img, (x, y), (x + w, y + h), pink, 2)
-                
-                # Label box above the head
-                cv2.rectangle(img, (x, y - 35), (x + w, y), pink, -1)
-                cv2.putText(img, f"ID: {dominant}", (x + 5, y - 10), 
+                # Draw a small header box for the text
+                cv2.rectangle(img, (x, y - 30), (x + w, y), pink, -1)
+                cv2.putText(img, dominant, (x + 5, y - 10), 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
         except Exception as e:
-            # This prevents the camera from going black if a frame fails
+            # If the AI fails, we still return the frame so you see the camera
             pass
 
         return av.VideoFrame.from_ndarray(img, format="bgr24")
@@ -55,20 +60,14 @@ with col1:
     )
 
 with col2:
-    st.subheader("📋 Analysis Results")
+    st.subheader("📋 Live Results")
     res_title = st.empty()
     res_conf = st.empty()
-    res_note = st.empty()
 
     while ctx.state.playing:
         try:
             data = st.session_state.status_queue.get(timeout=0.1)
-            res_title.metric("ACTIVE PERSONA", data['emo'])
-            res_conf.progress(min(float(data['conf'])/100, 1.0), text=f"AI Confidence: {int(data['conf'])}%")
-            
-            if data['emo'] == "HAPPY":
-                res_note.success("Status: Optimal Engagement")
-            else:
-                res_note.info("Status: Analyzing Biometrics...")
+            res_title.metric("IDENTIFIED PERSONA", data['emo'])
+            res_conf.progress(min(float(data['conf'])/100, 1.0), text=f"Confidence: {int(data['conf'])}%")
         except queue.Empty:
             continue

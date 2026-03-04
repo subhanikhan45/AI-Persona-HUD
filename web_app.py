@@ -4,70 +4,45 @@ import av, cv2, queue
 from deepface import DeepFace
 
 st.set_page_config(page_title="Neural Persona HUD", layout="wide")
-st.title("🛡️ Neural Persona: Web Dashboard v7.0")
+st.title("🛡️ Neural Persona: Web Dashboard v3.0")
 
-# 1. The Data Bridge
-if "status_queue" not in st.session_state:
-    st.session_state.status_queue = queue.Queue()
+# 1. The Queue Bridge
+result_queue = queue.Queue()
 
 class VideoProcessor(VideoProcessorBase):
     def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
         img = frame.to_ndarray(format="bgr24")
-        
         try:
-            # We use enforce_detection=False to prevent the 'No face detected' crash
-            # We use detector_backend='opencv' because it is the LIGHTEST for your 8GB RAM
-            results = DeepFace.analyze(img, actions=['emotion'], 
-                                       enforce_detection=False, 
-                                       detector_backend='opencv',
-                                       align=False) # Align=False makes it 2x faster
-            
-            if results and len(results) > 0:
-                face = results[0]['region']
-                # The exact coordinates of your face
-                x, y, w, h = int(face['x']), int(face['y']), int(face['w']), int(face['h'])
+            results = DeepFace.analyze(img, actions=['emotion'], enforce_detection=False, detector_backend='opencv')
+            if results:
+                emotions = results[0]['emotion']
+                # PUSH data to the queue
+                result_queue.put(emotions)
                 
+                # Draw HUD
                 dominant = results[0]['dominant_emotion'].upper()
-                score = results[0]['emotion'][dominant.lower()]
-                
-                # Update the right-side dashboard
-                st.session_state.status_queue.put({"emo": dominant, "conf": score})
-
-                # DRAWING THE BOX:
-                pink = (255, 0, 255)
-                # Draw the main tracking square
-                cv2.rectangle(img, (x, y), (x + w, y + h), pink, 2)
-                # Draw a small header box for the text
-                cv2.rectangle(img, (x, y - 30), (x + w, y), pink, -1)
-                cv2.putText(img, dominant, (x + 5, y - 10), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-        except Exception as e:
-            # If the AI fails, we still return the frame so you see the camera
-            pass
-
+                cv2.rectangle(img, (170, 110), (470, 410), (255, 0, 255), 2)
+                cv2.putText(img, f"PERSONA: {dominant}", (180, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 255), 2)
+        except: pass
         return av.VideoFrame.from_ndarray(img, format="bgr24")
 
-# --- Layout ---
+# 2. Layout (The Fix is Here)
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    st.subheader("📡 Live Feed")
-    ctx = webrtc_streamer(
-        key="neural",
-        video_processor_factory=VideoProcessor,
-        rtc_configuration=RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}),
-        media_stream_constraints={"video": True, "audio": False}
-    )
+    ctx = webrtc_streamer(key="neural", video_processor_factory=VideoProcessor, 
+                          rtc_configuration=RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}),
+                          media_stream_constraints={"video": True, "audio": False})
 
 with col2:
-    st.subheader("📋 Live Results")
-    res_title = st.empty()
-    res_conf = st.empty()
-
+    st.subheader("📊 Live Analytics")
+    chart_placeholder = st.empty()
+    
+    # This simplified loop ensures the chart updates ONLY when data exists
     while ctx.state.playing:
         try:
-            data = st.session_state.status_queue.get(timeout=0.1)
-            res_title.metric("IDENTIFIED PERSONA", data['emo'])
-            res_conf.progress(min(float(data['conf'])/100, 1.0), text=f"Confidence: {int(data['conf'])}%")
+            # We use a very short timeout to keep the UI responsive
+            data = result_queue.get(timeout=0.1)
+            chart_placeholder.bar_chart(data)
         except queue.Empty:
             continue

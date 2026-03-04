@@ -3,46 +3,73 @@ from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfigurati
 import av, cv2, queue
 from deepface import DeepFace
 
-st.set_page_config(page_title="Neural Persona HUD", layout="wide")
-st.title("🛡️ Neural Persona: Web Dashboard v3.0")
-
-# 1. The Queue Bridge
-result_queue = queue.Queue()
+# 1. THE BRIDGE: Create a queue to hold the emotion results
+if "result_queue" not in st.session_state:
+    st.session_state.result_queue = queue.Queue()
 
 class VideoProcessor(VideoProcessorBase):
     def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
         img = frame.to_ndarray(format="bgr24")
+        
         try:
+            # AI Analysis
             results = DeepFace.analyze(img, actions=['emotion'], enforce_detection=False, detector_backend='opencv')
+            
             if results:
-                emotions = results[0]['emotion']
-                # PUSH data to the queue
-                result_queue.put(emotions)
+                face_data = results[0]['region']
+                x, y, w, h = face_data['x'], face_data['y'], face_data['w'], face_data['h']
                 
-                # Draw HUD
+                # Get the results
+                emotions = results[0]['emotion'] # The full breakdown (0-100%)
                 dominant = results[0]['dominant_emotion'].upper()
-                cv2.rectangle(img, (170, 110), (470, 410), (255, 0, 255), 2)
-                cv2.putText(img, f"PERSONA: {dominant}", (180, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 255), 2)
-        except: pass
+                
+                # PUSH the results into the bridge for the dashboard to see
+                st.session_state.result_queue.put({"emo": dominant, "all": emotions})
+                
+                # DRAW: Pink Tracking Box
+                pink_color = (255, 0, 255)
+                cv2.rectangle(img, (x, y), (x + w, y + h), pink_color, 2)
+                cv2.putText(img, f"PERSONA: {dominant}", (x, y - 10), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, pink_color, 2)
+        except:
+            pass
+
         return av.VideoFrame.from_ndarray(img, format="bgr24")
 
-# 2. Layout (The Fix is Here)
+# 2. DASHBOARD LAYOUT
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    ctx = webrtc_streamer(key="neural", video_processor_factory=VideoProcessor, 
-                          rtc_configuration=RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}),
-                          media_stream_constraints={"video": True, "audio": False})
+    st.subheader("📡 Live Feed")
+    ctx = webrtc_streamer(
+        key="neural-hud",
+        video_processor_factory=VideoProcessor,
+        rtc_configuration=RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}),
+        media_stream_constraints={"video": True, "audio": False}
+    )
 
 with col2:
-    st.subheader("📊 Live Analytics")
-    chart_placeholder = st.empty()
-    
-    # This simplified loop ensures the chart updates ONLY when data exists
+    st.subheader("📊 Emotion Analytics")
+    # Placeholders for results
+    persona_text = st.empty()
+    confidence_chart = st.empty()
+    status_msg = st.empty()
+
+    # 3. THE SYNC LOOP: Pulls data from the bridge and updates the UI
     while ctx.state.playing:
         try:
-            # We use a very short timeout to keep the UI responsive
-            data = result_queue.get(timeout=0.1)
-            chart_placeholder.bar_chart(data)
+            # Pull data from the queue (wait up to 0.1 seconds)
+            data = st.session_state.result_queue.get(timeout=0.1)
+            
+            # SHOW the results properly
+            persona_text.metric("Active Persona", data['emo'])
+            confidence_chart.bar_chart(data['all'])
+            
+            # Add a system status note
+            if data['emo'] == "HAPPY":
+                status_msg.success("System Status: OPTIMAL")
+            else:
+                status_msg.info("System Status: SCANNING...")
+                
         except queue.Empty:
             continue

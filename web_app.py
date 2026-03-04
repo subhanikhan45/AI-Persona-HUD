@@ -14,7 +14,7 @@ RTC_CONFIG = RTCConfiguration(
     {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
 )
 
-# Shared Queue for Analysis Data
+# Shared Queue for Analysis Data (The Bridge)
 result_queue = queue.Queue()
 
 # 2. The AI Engine Class
@@ -31,7 +31,7 @@ class VideoProcessor(VideoProcessorBase):
                 emotions = results[0]['emotion']
                 dominant = results[0]['dominant_emotion'].upper()
                 
-                # Push data to the main thread for charts
+                # PUSH data to the bridge for the main thread
                 result_queue.put(emotions)
 
                 # Draw the HUD directly on the video
@@ -60,10 +60,10 @@ with col2:
     st.subheader("📊 Live Emotion Analytics")
     chart_placeholder = st.empty()
     
-    # This loop pulls data from the queue and updates the UI live
+    # This loop PULLS data from the bridge and updates the UI live
     while webrtc_ctx.state.playing:
         try:
-            # Pull the latest emotion data
+            # Get the latest emotion data with a small timeout
             data = result_queue.get(timeout=1.0)
             chart_placeholder.bar_chart(data)
         except queue.Empty:

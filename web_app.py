@@ -35,7 +35,7 @@ with col1:
                           media_stream_constraints={"video": True, "audio": False})
 
 with col2:
-    st.subheader()
+    st.subheader("📊 Live Analytics")
     chart_placeholder = st.empty()
     
     # This simplified loop ensures the chart updates ONLY when data exists
@@ -46,5 +46,6 @@ with col2:
             chart_placeholder.bar_chart(data)
         except queue.Empty:
             continue
+
 
 

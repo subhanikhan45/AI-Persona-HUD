@@ -4,7 +4,7 @@ import av, cv2, queue
 from deepface import DeepFace
 
 st.set_page_config(page_title="Neural Persona HUD", layout="wide")
-st.title("🛡️ Neural Persona: Web Dashboard v3.0")
+st.title("🛡️ Emotion Detector Live")
 
 # 1. The Data Bridge (Queue)
 # This allows the AI thread to send data to the Chart thread
@@ -56,3 +56,4 @@ while ctx.state.playing:
         chart_placeholder.bar_chart(data)
     except queue.Empty:
         continue
+

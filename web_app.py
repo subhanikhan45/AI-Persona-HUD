@@ -4,9 +4,9 @@ import av, cv2, queue
 from deepface import DeepFace
 
 st.set_page_config(page_title="Neural Persona HUD", layout="wide")
-st.title("🛡️ Neural Persona: Web Dashboard v5.0")
+st.title("🛡️ Neural Persona: Web Dashboard v6.0")
 
-# Bridge for the Status Display
+# 1. The Data Bridge (Essential for the right-side results)
 if "status_queue" not in st.session_state:
     st.session_state.status_queue = queue.Queue()
 
@@ -15,65 +15,70 @@ class VideoProcessor(VideoProcessorBase):
         img = frame.to_ndarray(format="bgr24")
         
         try:
-            results = DeepFace.analyze(img, actions=['emotion'], enforce_detection=False, detector_backend='opencv')
-            if results:
-                face_data = results[0]['region']
-                fx, fy, fw, fh = face_data['x'], face_data['y'], face_data['w'], face_data['h']
+            # AI Logic: We use 'mediapipe' here because it is much more stable in the cloud
+            results = DeepFace.analyze(img, actions=['emotion'], enforce_detection=False, detector_backend='mediapipe')
+            
+            if results and len(results) > 0:
+                # Get the moving face coordinates
+                face = results[0]['region']
+                x, y, w, h = face['x'], face['y'], face['w'], face['h']
                 
+                # Get the emotion data
                 dominant = results[0]['dominant_emotion'].upper()
                 score = results[0]['emotion'][dominant.lower()]
                 
-                # Push analysis to the right-side dashboard
+                # Send data to the right-side dashboard
                 st.session_state.status_queue.put({"emo": dominant, "conf": score})
 
-                # Draw the HUD box that follows your face
-                color = (255, 0, 255) # Pink
-                cv2.rectangle(img, (fx, fy), (fx + fw, fy + fh), color, 2)
-                cv2.putText(img, f"SCANNING: {dominant}", (fx, fy - 10), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-        except: pass
+                # DRAW: The Pink Square that FOLLOWS the face
+                pink = (255, 0, 255)
+                cv2.rectangle(img, (x, y), (x + w, y + h), pink, 2)
+                
+                # Label box above the head
+                cv2.rectangle(img, (x, y - 35), (x + w, y), pink, -1)
+                cv2.putText(img, f"ID: {dominant}", (x + 5, fy - 10 if 'fy' in locals() else y-10), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        except Exception as e:
+            # If AI fails, we still return the image so the cam doesn't go black
+            pass
+
         return av.VideoFrame.from_ndarray(img, format="bgr24")
 
 # --- Layout ---
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    st.subheader("📡 Live Neural Feed")
-    ctx = webrtc_streamer(key="neural", video_processor_factory=VideoProcessor,
-                          rtc_configuration=RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}))
+    st.subheader("📡 Live Feed")
+    ctx = webrtc_streamer(
+        key="neural",
+        video_processor_factory=VideoProcessor,
+        rtc_configuration=RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}),
+        media_stream_constraints={"video": True, "audio": False}
+    )
 
 with col2:
-    st.subheader("📋 Biometric Analysis")
+    st.subheader("📋 Analysis Results")
     
-    # 1. Big Status Metric
-    persona_display = st.empty()
-    
-    # 2. Confidence Progress Bar
-    conf_display = st.empty()
-    
-    # 3. System Advice Card
-    advice_display = st.empty()
+    # Placeholders for the right side
+    res_title = st.empty()
+    res_conf = st.empty()
+    res_note = st.empty()
 
-    # The Loop that pulls AI data and puts it in the displays above
+    # This loop keeps the right side alive
     while ctx.state.playing:
         try:
+            # Pull data from the AI
             data = st.session_state.status_queue.get(timeout=0.1)
             
-            # Update the big Metric
-            persona_display.metric(label="Detected Persona", value=data['emo'])
+            # Show Results on the right
+            res_title.metric("ACTIVE PERSONA", data['emo'])
+            res_conf.progress(min(float(data['conf'])/100, 1.0), text=f"AI Confidence: {int(data['conf'])}%")
             
-            # Update the progress bar
-            confidence = min(float(data['conf'])/100, 1.0)
-            conf_display.progress(confidence, text=f"AI Confidence: {int(data['conf'])}%")
-            
-            # Update the advice box based on emotion
+            # Simple status text
             if data['emo'] == "HAPPY":
-                advice_display.success("System Status: OPTIMAL. Positive reinforcement active.")
-            elif data['emo'] == "ANGRY":
-                advice_display.error("Warning: HIGH STRESS levels detected. Protocol: Breathe.")
-            elif data['emo'] == "NEUTRAL":
-                advice_display.info("System Status: STEADY. Monitoring baseline data.")
+                res_note.success("Status: Optimal Engagement")
             else:
-                advice_display.warning("Status: FLUCTUATING. Analyzing biometric spikes.")
+                res_note.info("Status: Analyzing Biometrics...")
                 
-        except queue.Empty: continue
+        except queue.Empty:
+            continue
